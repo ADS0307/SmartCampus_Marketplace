@@ -1,735 +1,905 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// API Configuration
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('home');
+  // State Management
+  const [currentView, setCurrentView] = useState('home');
   const [user, setUser] = useState(null);
-  const [products, setProducts] = useState([]);
-  const [myProducts, setMyProducts] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [sales, setSales] = useState([]);
-  const [stats, setStats] = useState({});
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [filters, setFilters] = useState({
-    search: '',
-    category: '',
-    condition: '',
-    availableFor: '',
-    minPrice: '',
-    maxPrice: ''
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  
+  // Form States
+  const [loginForm, setLoginForm] = useState({ registrationNumber: '', password: '' });
+  const [registerForm, setRegisterForm] = useState({ name: '', registrationNumber: '', email: '', password: '', phone: '' });
+  const [productForm, setProductForm] = useState({
+    title: '',
+    description: '',
+    price: '',
+    category: 'electronics',
+    condition: 'good',
+    transactionType: 'buy',
+    imageUrl: ''
   });
 
+  // Data States
+  const [products, setProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [myListings, setMyListings] = useState([]);
+  const [myPurchases, setMyPurchases] = useState([]);
+  const [mySales, setMySales] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [messageText, setMessageText] = useState('');
+
+  // Filter States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterType, setFilterType] = useState('all');
+  const [priceRange, setPriceRange] = useState({ min: '', max: '' });
+
+  // UI States
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Check authentication on mount
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
-    if (token && savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchProducts();
-  }, [filters]);
-
-  useEffect(() => {
-    if (user) {
-      fetchMyProducts();
-      fetchOrders();
-      fetchSales();
-      fetchStats();
-    }
-  }, [user]);
-
-  const redirectToLogin = () => {
-    alert('Please login to continue.');
-    setCurrentPage('login');
-  };
-
-  const apiCall = async (endpoint, method = 'GET', body = null) => {
-    const token = localStorage.getItem('token');
-    const headers = {
-      'Content-Type': 'application/json',
-    };
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      fetchUserData();
     }
+  }, [token]);
 
-    const options = {
-      method,
-      headers,
-    };
-
-    if (body) {
-      options.body = JSON.stringify(body);
+  // Fetch products on view change
+  useEffect(() => {
+    if (currentView === 'home' || currentView === 'browse') {
+      fetchProducts();
+    } else if (currentView === 'dashboard' && user) {
+      fetchMyListings();
+      fetchMyPurchases();
+      fetchMySales();
+    } else if (currentView === 'messages' && user) {
+      fetchMessages();
     }
+  }, [currentView, user]);
 
-    const response = await fetch(`${API_URL}${endpoint}`, options);
-    const data = await response.json();
+  // Apply filters
+  useEffect(() => {
+    applyFilters();
+  }, [searchQuery, filterCategory, filterType, priceRange, products]);
 
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-        setCurrentPage('login');
-      }
-      throw new Error(data.error || 'Something went wrong');
+  // ==================== API CALLS ====================
+
+  const fetchUserData = async () => {
+    try {
+      // User data is in token, decode it
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      setUser(payload);
+    } catch (error) {
+      console.error('Error loading user:', error);
+      logout();
     }
-
-    return data;
   };
 
   const fetchProducts = async () => {
     try {
-      const params = new URLSearchParams();
-      Object.keys(filters).forEach(key => {
-        if (filters[key]) params.append(key, filters[key]);
-      });
-      const data = await apiCall(`/products?${params.toString()}`);
+      const response = await fetch(`${API_URL}/api/products`);
+      const data = await response.json();
       setProducts(data);
     } catch (error) {
       console.error('Error fetching products:', error);
+      setError('Failed to load products');
     }
   };
 
-  const fetchMyProducts = async () => {
+  const fetchMyListings = async () => {
     try {
-      const data = await apiCall('/my-products');
-      setMyProducts(data);
+      const response = await fetch(`${API_URL}/api/products/user/my-listings`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      setMyListings(data);
     } catch (error) {
-      console.error('Error fetching my products:', error);
+      console.error('Error fetching listings:', error);
     }
   };
 
-  const fetchOrders = async () => {
+  const fetchMyPurchases = async () => {
     try {
-      const data = await apiCall('/my-orders');
-      setOrders(data);
+      const response = await fetch(`${API_URL}/api/orders/my-purchases`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      setMyPurchases(data);
     } catch (error) {
-      console.error('Error fetching orders:', error);
+      console.error('Error fetching purchases:', error);
     }
   };
 
-  const fetchSales = async () => {
+  const fetchMySales = async () => {
     try {
-      const data = await apiCall('/my-sales');
-      setSales(data);
+      const response = await fetch(`${API_URL}/api/orders/my-sales`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      setMySales(data);
     } catch (error) {
       console.error('Error fetching sales:', error);
     }
   };
 
-  const fetchStats = async () => {
+  const fetchMessages = async () => {
     try {
-      const data = await apiCall('/stats');
-      setStats(data);
+      const response = await fetch(`${API_URL}/api/messages`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await response.json();
+      setMessages(data);
     } catch (error) {
-      console.error('Error fetching stats:', error);
+      console.error('Error fetching messages:', error);
     }
   };
 
-  const handleRegister = async (formData) => {
+  // ==================== AUTH HANDLERS ====================
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
     try {
-      const data = await apiCall('/auth/register', 'POST', formData);
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setUser(data.user);
-      setCurrentPage('home');
-      alert('Registration successful!');
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerForm)
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccess('Registration successful! Logging you in...');
+        localStorage.setItem('token', data.token);
+        setToken(data.token);
+        setUser(data.user);
+        setRegisterForm({ name: '', registrationNumber: '', email: '', password: '', phone: '' });
+        setTimeout(() => setCurrentView('home'), 1000);
+      } else {
+        setError(data.error || 'Registration failed');
+      }
     } catch (error) {
-      alert(error.message);
+      console.error('Registration error:', error);
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogin = async (formData) => {
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
     try {
-      const data = await apiCall('/auth/login', 'POST', formData);
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
-      setUser(data.user);
-      setCurrentPage('home');
-      alert('Login successful!');
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm)
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccess('Login successful!');
+        localStorage.setItem('token', data.token);
+        setToken(data.token);
+        setUser(data.user);
+        setLoginForm({ registrationNumber: '', password: '' });
+        setTimeout(() => setCurrentView('home'), 1000);
+      } else {
+        setError(data.error || 'Login failed');
+      }
     } catch (error) {
-      alert(error.message);
+      console.error('Login error:', error);
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => {
+  const logout = () => {
     localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    setToken(null);
     setUser(null);
-    setCurrentPage('home');
+    setCurrentView('home');
+    setSuccess('Logged out successfully');
   };
 
-  const handleCreateProduct = async (formData) => {
+  // ==================== PRODUCT HANDLERS ====================
+
+  const handleAddProduct = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
     try {
-      await apiCall('/products', 'POST', formData);
-      fetchProducts();
-      fetchMyProducts();
-      setCurrentPage('myProducts');
-      alert('Product listed successfully!');
+      const response = await fetch(`${API_URL}/api/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ...productForm,
+          price: Number(productForm.price)
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccess('Product added successfully!');
+        setProductForm({
+          title: '',
+          description: '',
+          price: '',
+          category: 'electronics',
+          condition: 'good',
+          transactionType: 'buy',
+          imageUrl: ''
+        });
+        fetchProducts();
+        fetchMyListings();
+        setTimeout(() => setCurrentView('dashboard'), 1500);
+      } else {
+        setError(data.error || 'Failed to add product');
+      }
     } catch (error) {
-      alert(error.message);
+      console.error('Error adding product:', error);
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDeleteProduct = async (productId) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
-      try {
-        await apiCall(`/products/${productId}`, 'DELETE');
+    if (!window.confirm('Are you sure you want to delete this product?')) return;
+
+    try {
+      const response = await fetch(`${API_URL}/api/products/${productId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        setSuccess('Product deleted successfully');
         fetchProducts();
-        fetchMyProducts();
-        alert('Product deleted successfully!');
+        fetchMyListings();
+      } else {
+        const data = await response.json();
+        setError(data.error || 'Failed to delete product');
+      }
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      setError('Network error. Please try again.');
+    }
+  };
+
+  const handlePlaceOrder = async (product) => {
+    if (!user) {
+      setError('Please login to place an order');
+      setCurrentView('login');
+      return;
+    }
+
+    if (window.confirm(`Place order for "${product.title}" at ₹${product.price}?`)) {
+      setLoading(true);
+      try {
+        const response = await fetch(`${API_URL}/api/orders`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ productId: product._id })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          setSuccess(data.message);
+          fetchProducts();
+          setSelectedProduct(null);
+        } else {
+          setError(data.error || 'Failed to place order');
+        }
       } catch (error) {
-        alert(error.message);
+        console.error('Error placing order:', error);
+        setError('Network error. Please try again.');
+      } finally {
+        setLoading(false);
       }
     }
   };
 
-  const handlePlaceOrder = async (productId, orderDetails) => {
-    if (!user) {
-      redirectToLogin();
-      return;
-    }
+  const handleCancelOrder = async (orderId) => {
+    const reason = window.prompt('Please provide a reason for cancellation (optional):');
+    if (reason === null) return; // User clicked cancel
 
+    setLoading(true);
     try {
-      await apiCall('/orders', 'POST', { productId, ...orderDetails });
-      fetchProducts();
-      fetchOrders();
-      setSelectedProduct(null);
-      alert('Order placed successfully! Check your orders page.');
+      const response = await fetch(`${API_URL}/api/orders/${orderId}/cancel`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ reason: reason || 'No reason provided' })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccess(data.message);
+        fetchMyPurchases();
+        fetchMySales();
+        fetchProducts();
+      } else {
+        setError(data.error || 'Failed to cancel order');
+      }
     } catch (error) {
-      alert(error.message);
+      console.error('Error cancelling order:', error);
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const Navigation = () => (
-    <nav className="navbar">
-      <div className="nav-container">
-        <h1 className="logo" onClick={() => setCurrentPage('home')}>
-          🎓 Campus Marketplace
-        </h1>
-        <div className="nav-links">
-          <button onClick={() => setCurrentPage('home')} className={currentPage === 'home' ? 'active' : ''}>
-            Home
-          </button>
-          {user ? (
-            <>
-              <button onClick={() => setCurrentPage('myProducts')} className={currentPage === 'myProducts' ? 'active' : ''}>
-                My Listings
-              </button>
-              <button onClick={() => setCurrentPage('addProduct')} className={currentPage === 'addProduct' ? 'active' : ''}>
-                Sell Item
-              </button>
-              <button onClick={() => setCurrentPage('orders')} className={currentPage === 'orders' ? 'active' : ''}>
-                My Orders
-              </button>
-              <button onClick={() => setCurrentPage('sales')} className={currentPage === 'sales' ? 'active' : ''}>
-                My Sales
-              </button>
-              <button onClick={() => setCurrentPage('dashboard')} className={currentPage === 'dashboard' ? 'active' : ''}>
-                Dashboard
-              </button>
-              <div className="user-info">
-                <span>👤 {user.name} ({user.userType})</span>
-                <button onClick={handleLogout} className="logout-btn">Logout</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <button onClick={() => setCurrentPage('login')}>Login</button>
-              <button onClick={() => setCurrentPage('register')} className="register-btn">Register</button>
-            </>
-          )}
+  const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const response = await fetch(`${API_URL}/api/orders/${orderId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        setSuccess(`Order marked as ${newStatus}`);
+        fetchMySales();
+      } else {
+        const data = await response.json();
+        setError(data.error || 'Failed to update order');
+      }
+    } catch (error) {
+      console.error('Error updating order:', error);
+      setError('Network error. Please try again.');
+    }
+  };
+
+  // ==================== MESSAGE HANDLERS ====================
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!messageText.trim()) return;
+
+    try {
+      const response = await fetch(`${API_URL}/api/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          receiverId: selectedProduct.sellerId,
+          productId: selectedProduct._id,
+          message: messageText
+        })
+      });
+
+      if (response.ok) {
+        setSuccess('Message sent successfully!');
+        setMessageText('');
+        fetchMessages();
+      } else {
+        const data = await response.json();
+        setError(data.error || 'Failed to send message');
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setError('Network error. Please try again.');
+    }
+  };
+
+  // ==================== FILTER HANDLERS ====================
+
+  const applyFilters = () => {
+    let filtered = [...products];
+
+    // Search filter
+    if (searchQuery) {
+      filtered = filtered.filter(p =>
+        p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.description.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Category filter
+    if (filterCategory !== 'all') {
+      filtered = filtered.filter(p => p.category === filterCategory);
+    }
+
+    // Transaction type filter
+    if (filterType !== 'all') {
+      filtered = filtered.filter(p => p.transactionType === filterType);
+    }
+
+    // Price range filter
+    if (priceRange.min) {
+      filtered = filtered.filter(p => p.price >= Number(priceRange.min));
+    }
+    if (priceRange.max) {
+      filtered = filtered.filter(p => p.price <= Number(priceRange.max));
+    }
+
+    setFilteredProducts(filtered);
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterCategory('all');
+    setFilterType('all');
+    setPriceRange({ min: '', max: '' });
+  };
+
+  // ==================== HELPER FUNCTIONS ====================
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getStatusColor = (status) => {
+    const colors = {
+      pending: '#FFA500',
+      confirmed: '#00A896',
+      cancelled: '#DC3545',
+      completed: '#28A745'
+    };
+    return colors[status] || '#6C757D';
+  };
+
+  const getConditionBadge = (condition) => {
+    const badges = {
+      'like-new': '✨ Like New',
+      'good': '👍 Good',
+      'fair': '👌 Fair'
+    };
+    return badges[condition] || condition;
+  };
+
+  // ==================== RENDER COMPONENTS ====================
+
+  // Alert Messages
+  const renderAlerts = () => (
+    <>
+      {error && (
+        <div className="alert alert-error">
+          <span>❌ {error}</span>
+          <button onClick={() => setError('')}>✕</button>
         </div>
+      )}
+      {success && (
+        <div className="alert alert-success">
+          <span>✅ {success}</span>
+          <button onClick={() => setSuccess('')}>✕</button>
+        </div>
+      )}
+    </>
+  );
+
+  // Navigation Bar
+  const renderNavbar = () => (
+    <nav className="navbar">
+      <div className="nav-brand" onClick={() => setCurrentView('home')}>
+        <span className="logo">🎓</span>
+        <span className="brand-name">Smart Campus Marketplace</span>
+      </div>
+      
+      <div className="nav-menu">
+        <button 
+          className={currentView === 'home' ? 'nav-link active' : 'nav-link'}
+          onClick={() => setCurrentView('home')}
+        >
+          Home
+        </button>
+        <button 
+          className={currentView === 'browse' ? 'nav-link active' : 'nav-link'}
+          onClick={() => setCurrentView('browse')}
+        >
+          Browse
+        </button>
+        
+        {user ? (
+          <>
+            <button 
+              className={currentView === 'add-product' ? 'nav-link active' : 'nav-link'}
+              onClick={() => setCurrentView('add-product')}
+            >
+              Sell Item
+            </button>
+            <button 
+              className={currentView === 'dashboard' ? 'nav-link active' : 'nav-link'}
+              onClick={() => setCurrentView('dashboard')}
+            >
+              Dashboard
+            </button>
+            <button 
+              className={currentView === 'messages' ? 'nav-link active' : 'nav-link'}
+              onClick={() => setCurrentView('messages')}
+            >
+              Messages {messages.filter(m => !m.isRead && m.receiverId === user.id).length > 0 && 
+                <span className="badge">{messages.filter(m => !m.isRead && m.receiverId === user.id).length}</span>
+              }
+            </button>
+            <div className="nav-user">
+              <span className="user-name">👤 {user.name}</span>
+              <button className="btn-logout" onClick={logout}>Logout</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <button 
+              className={currentView === 'login' ? 'nav-link active' : 'nav-link'}
+              onClick={() => setCurrentView('login')}
+            >
+              Login
+            </button>
+            <button 
+              className="btn-register"
+              onClick={() => setCurrentView('register')}
+            >
+              Register
+            </button>
+          </>
+        )}
       </div>
     </nav>
   );
 
-  const FilterBar = () => (
-    <div className="filter-bar">
-      <input
-        type="text"
-        placeholder="Search products..."
-        value={filters.search}
-        onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-        className="search-input"
-      />
-      <select value={filters.category} onChange={(e) => setFilters({ ...filters, category: e.target.value })}>
-        <option value="">All Categories</option>
-        <option value="textbooks">Textbooks</option>
-        <option value="electronics">Electronics</option>
-        <option value="stationery">Stationery</option>
-        <option value="lab-equipment">Lab Equipment</option>
-        <option value="furniture">Furniture</option>
-        <option value="clothing">Clothing</option>
-        <option value="services">Services</option>
-        <option value="other">Other</option>
-      </select>
-      <select value={filters.condition} onChange={(e) => setFilters({ ...filters, condition: e.target.value })}>
-        <option value="">All Conditions</option>
-        <option value="new">New</option>
-        <option value="like-new">Like New</option>
-        <option value="good">Good</option>
-        <option value="fair">Fair</option>
-      </select>
-      <select value={filters.availableFor} onChange={(e) => setFilters({ ...filters, availableFor: e.target.value })}>
-        <option value="">Buy/Rent/Borrow</option>
-        <option value="sale">For Sale</option>
-        <option value="rent">For Rent</option>
-        <option value="borrow">For Borrow</option>
-      </select>
-      <input
-        type="number"
-        placeholder="Min Price"
-        value={filters.minPrice}
-        onChange={(e) => setFilters({ ...filters, minPrice: e.target.value })}
-        className="price-input"
-      />
-      <input
-        type="number"
-        placeholder="Max Price"
-        value={filters.maxPrice}
-        onChange={(e) => setFilters({ ...filters, maxPrice: e.target.value })}
-        className="price-input"
-      />
-      <button onClick={() => setFilters({ search: '', category: '', condition: '', availableFor: '', minPrice: '', maxPrice: '' })}>
-        Clear Filters
-      </button>
+  // Home Page
+  const renderHome = () => (
+    <div className="home-page">
+      <div className="hero-section">
+        <h1>Welcome to Smart Campus Marketplace</h1>
+        <p className="hero-subtitle">Buy, Sell, Rent & Borrow within your campus community</p>
+        <div className="hero-stats">
+          <div className="stat-card">
+            <h3>{products.length}</h3>
+            <p>Active Listings</p>
+          </div>
+          <div className="stat-card">
+            <h3>{products.filter(p => p.transactionType === 'rent').length}</h3>
+            <p>Rentals Available</p>
+          </div>
+          <div className="stat-card">
+            <h3>{products.filter(p => p.transactionType === 'borrow').length}</h3>
+            <p>Free to Borrow</p>
+          </div>
+        </div>
+        <button className="btn-primary btn-large" onClick={() => setCurrentView('browse')}>
+          Start Browsing →
+        </button>
+      </div>
+
+      <div className="features-section">
+        <h2>How It Works</h2>
+        <div className="features-grid">
+          <div className="feature-card">
+            <span className="feature-icon">🛍️</span>
+            <h3>Buy</h3>
+            <p>Purchase items at great prices from fellow students</p>
+          </div>
+          <div className="feature-card">
+            <span className="feature-icon">💰</span>
+            <h3>Sell</h3>
+            <p>List your items and earn money easily</p>
+          </div>
+          <div className="feature-card">
+            <span className="feature-icon">🔄</span>
+            <h3>Rent</h3>
+            <p>Rent items you need temporarily</p>
+          </div>
+          <div className="feature-card">
+            <span className="feature-icon">🤝</span>
+            <h3>Borrow</h3>
+            <p>Borrow items for free from generous peers</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="categories-section">
+        <h2>Popular Categories</h2>
+        <div className="category-grid">
+          {['Electronics', 'Books', 'Furniture', 'Sports', 'Stationery', 'Others'].map(cat => (
+            <div 
+              key={cat}
+              className="category-card"
+              onClick={() => {
+                setFilterCategory(cat.toLowerCase());
+                setCurrentView('browse');
+              }}
+            >
+              <span className="category-icon">
+                {cat === 'Electronics' && '💻'}
+                {cat === 'Books' && '📚'}
+                {cat === 'Furniture' && '🪑'}
+                {cat === 'Sports' && '⚽'}
+                {cat === 'Stationery' && '✏️'}
+                {cat === 'Others' && '🎯'}
+              </span>
+              <h4>{cat}</h4>
+              <p>{products.filter(p => p.category === cat.toLowerCase()).length} items</p>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 
-  const ProductCard = ({ product, showActions = false, onDelete = null }) => (
-    <div className="product-card">
-      <div className="product-image">
-        {product.images && product.images.length > 0 ? (
-          <img src={product.images[0]} alt={product.title} />
-        ) : (
-          <div className="no-image">📦</div>
-        )}
-        <span className={`badge badge-${product.availableFor}`}>
-          {product.availableFor === 'sale' ? 'For Sale' : product.availableFor === 'rent' ? 'For Rent' : 'For Borrow'}
-        </span>
+  // Browse Products
+  const renderBrowse = () => (
+    <div className="browse-page">
+      <div className="browse-header">
+        <h1>Browse Products</h1>
+        <p>Discover amazing deals from your campus community</p>
       </div>
-      <div className="product-info">
-        <h3>{product.title}</h3>
-        <p className="product-description">{product.description.substring(0, 100)}...</p>
-        <div className="product-meta">
-          <span className="price">₹{product.price}</span>
-          <span className="condition">{product.condition}</span>
-        </div>
-        <div className="product-details">
-          <p>📂 {product.category}</p>
-          <p>📍 {product.location || 'Campus'}</p>
-          <p>👤 {product.seller?.name} ({product.seller?.userType})</p>
-          <p>👁️ {product.views} views</p>
-        </div>
-        {!showActions ? (
-          <button onClick={() => setSelectedProduct(product)} className="view-btn">
-            View Details
+
+      <div className="filters-section">
+        <div className="filter-row">
+          <input
+            type="text"
+            className="search-bar"
+            placeholder="🔍 Search products..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          
+          <select 
+            className="filter-select"
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+          >
+            <option value="all">All Categories</option>
+            <option value="electronics">Electronics</option>
+            <option value="books">Books</option>
+            <option value="furniture">Furniture</option>
+            <option value="sports">Sports</option>
+            <option value="stationery">Stationery</option>
+            <option value="others">Others</option>
+          </select>
+
+          <select 
+            className="filter-select"
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+          >
+            <option value="all">All Types</option>
+            <option value="buy">For Sale</option>
+            <option value="rent">For Rent</option>
+            <option value="borrow">To Borrow</option>
+          </select>
+
+          <input
+            type="number"
+            className="filter-input"
+            placeholder="Min ₹"
+            value={priceRange.min}
+            onChange={(e) => setPriceRange({...priceRange, min: e.target.value})}
+          />
+
+          <input
+            type="number"
+            className="filter-input"
+            placeholder="Max ₹"
+            value={priceRange.max}
+            onChange={(e) => setPriceRange({...priceRange, max: e.target.value})}
+          />
+
+          <button className="btn-secondary" onClick={clearFilters}>
+            Clear Filters
           </button>
-        ) : (
-          <div className="product-actions">
-            <button onClick={() => onDelete(product._id)} className="delete-btn">Delete</button>
-          </div>
-        )}
+        </div>
       </div>
-    </div>
-  );
 
-  const HomePage = () => (
-    <div className="page">
-      <div className="hero">
-        <h2>VIT Campus Marketplace</h2>
-        <p>Buy, Sell, and Exchange within the campus community</p>
+      <div className="products-count">
+        Showing {filteredProducts.length} products
       </div>
-      <FilterBar />
+
       <div className="products-grid">
-        {products.length > 0 ? (
-          products.map(product => (
-            <ProductCard key={product._id} product={product} />
-          ))
-        ) : (
+        {filteredProducts.length === 0 ? (
           <div className="no-products">
-            <p>No products found. Be the first to list something!</p>
+            <h3>No products found</h3>
+            <p>Try adjusting your filters</p>
           </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const LoginPage = () => {
-    const [formData, setFormData] = useState({ email: '', password: '' });
-
-    return (
-      <div className="page">
-        <div className="auth-container">
-          <h2>Login</h2>
-          <form onSubmit={(e) => { e.preventDefault(); handleLogin(formData); }}>
-            <input
-              type="email"
-              placeholder="Email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required
-            />
-            <button type="submit">Login</button>
-          </form>
-          <p>
-            Don't have an account? <span onClick={() => setCurrentPage('register')} className="link">Register here</span>
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  const RegisterPage = () => {
-    const [formData, setFormData] = useState({
-      name: '',
-      email: '',
-      password: '',
-      userType: 'student',
-      department: '',
-      studentId: '',
-      employeeId: '',
-      phoneNumber: ''
-    });
-
-    return (
-      <div className="page">
-        <div className="auth-container">
-          <h2>Register</h2>
-          <form onSubmit={(e) => { e.preventDefault(); handleRegister(formData); }}>
-            <input
-              type="text"
-              placeholder="Full Name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
-            <input
-              type="email"
-              placeholder="Email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required
-            />
-            <select value={formData.userType} onChange={(e) => setFormData({ ...formData, userType: e.target.value })} required>
-              <option value="student">Student</option>
-              <option value="professor">Professor</option>
-            </select>
-            <input
-              type="text"
-              placeholder="Department"
-              value={formData.department}
-              onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-            />
-            {formData.userType === 'student' ? (
-              <input
-                type="text"
-                placeholder="Registration Number"
-                value={formData.studentId}
-                onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
-              />
-            ) : (
-              <input
-                type="text"
-                placeholder="Employee ID"
-                value={formData.employeeId}
-                onChange={(e) => setFormData({ ...formData, employeeId: e.target.value })}
-              />
-            )}
-            <input
-              type="tel"
-              placeholder="Phone Number"
-              value={formData.phoneNumber}
-              onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-            />
-            <button type="submit">Register</button>
-          </form>
-          <p>
-            Already have an account? <span onClick={() => setCurrentPage('login')} className="link">Login here</span>
-          </p>
-        </div>
-      </div>
-    );
-  };
-
-  const AddProductPage = () => {
-    const [formData, setFormData] = useState({
-      title: '',
-      description: '',
-      price: '',
-      category: 'textbooks',
-      condition: 'good',
-      location: '',
-      availableFor: 'sale',
-      tags: '',
-      images: ''
-    });
-
-    return (
-      <div className="page">
-        <div className="form-container">
-          <h2>List a New Item</h2>
-          <form onSubmit={(e) => {
-            e.preventDefault();
-            const productData = {
-              ...formData,
-              price: parseFloat(formData.price),
-              tags: formData.tags.split(',').map(t => t.trim()).filter(t => t),
-              images: formData.images.split(',').map(i => i.trim()).filter(i => i)
-            };
-            handleCreateProduct(productData);
-          }}>
-            <input
-              type="text"
-              placeholder="Product Title"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              required
-            />
-            <textarea
-              placeholder="Description"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              required
-              rows="4"
-            />
-            <input
-              type="number"
-              placeholder="Price (₹)"
-              value={formData.price}
-              onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-              required
-            />
-            <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} required>
-              <option value="textbooks">Textbooks</option>
-              <option value="electronics">Electronics</option>
-              <option value="stationery">Stationery</option>
-              <option value="lab-equipment">Lab Equipment</option>
-              <option value="furniture">Furniture</option>
-              <option value="clothing">Clothing</option>
-              <option value="services">Services</option>
-              <option value="other">Other</option>
-            </select>
-            <select value={formData.condition} onChange={(e) => setFormData({ ...formData, condition: e.target.value })} required>
-              <option value="new">New</option>
-              <option value="like-new">Like New</option>
-              <option value="good">Good</option>
-              <option value="fair">Fair</option>
-            </select>
-            <select value={formData.availableFor} onChange={(e) => setFormData({ ...formData, availableFor: e.target.value })} required>
-              <option value="sale">For Sale</option>
-              <option value="rent">For Rent</option>
-              <option value="borrow">For Borrow</option>
-            </select>
-            <input
-              type="text"
-              placeholder="Location (Building/Room)"
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-            />
-            <input
-              type="text"
-              placeholder="Tags (comma-separated)"
-              value={formData.tags}
-              onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
-            />
-            <input
-              type="text"
-              placeholder="Image URLs (comma-separated)"
-              value={formData.images}
-              onChange={(e) => setFormData({ ...formData, images: e.target.value })}
-            />
-            <button type="submit">List Product</button>
-          </form>
-        </div>
-      </div>
-    );
-  };
-
-  const MyProductsPage = () => (
-    <div className="page">
-      <h2>My Listings</h2>
-      <div className="products-grid">
-        {myProducts.length > 0 ? (
-          myProducts.map(product => (
-            <ProductCard key={product._id} product={product} showActions={true} onDelete={handleDeleteProduct} />
-          ))
         ) : (
-          <div className="no-products">
-            <p>You haven't listed any products yet.</p>
-            <button onClick={() => setCurrentPage('addProduct')}>List Your First Item</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+          filteredProducts.map(product => (
+            <div key={product._id} className="product-card">
+              <div className="product-image">
+                {product.imageUrl ? (
+                  <img src={product.imageUrl} alt={product.title} />
+                ) : (
+                  <div className="no-image">
+                    {product.category === 'electronics' && '💻'}
+                    {product.category === 'books' && '📚'}
+                    {product.category === 'furniture' && '🪑'}
+                    {product.category === 'sports' && '⚽'}
+                    {product.category === 'stationery' && '✏️'}
+                    {product.category === 'others' && '🎯'}
+                  </div>
+                )}
+                <span className={`badge-type type-${product.transactionType}`}>
+                  {product.transactionType === 'buy' && '💰 For Sale'}
+                  {product.transactionType === 'rent' && '🔄 For Rent'}
+                  {product.transactionType === 'borrow' && '🤝 To Borrow'}
+                </span>
+              </div>
+              
+              <div className="product-info">
+                <h3>{product.title}</h3>
+                <p className="product-description">{product.description.substring(0, 100)}...</p>
+                
+                <div className="product-meta">
+                  <span className="badge-condition">{getConditionBadge(product.condition)}</span>
+                  <span className="badge-category">
+                    {product.category.charAt(0).toUpperCase() + product.category.slice(1)}
+                  </span>
+                </div>
 
-  const OrdersPage = () => (
-    <div className="page">
-      <h2>My Orders</h2>
-      <div className="orders-list">
-        {orders.length > 0 ? (
-          orders.map(order => (
-            <div key={order._id} className="order-card">
-              <h3>{order.product?.title}</h3>
-              <p>Seller: {order.seller?.name} ({order.seller?.email})</p>
-              <p>Amount: ₹{order.totalAmount}</p>
-              <p>Status: <span className={`status status-${order.status}`}>{order.status}</span></p>
-              <p>Meetup: {order.meetupLocation} at {new Date(order.meetupTime).toLocaleString()}</p>
-              <p>Payment: {order.paymentMethod}</p>
-              <p>Contact: {order.seller?.phoneNumber}</p>
+                <div className="product-footer">
+                  <div className="price-section">
+                    <span className="price">₹{product.price.toLocaleString('en-IN')}</span>
+                    {product.transactionType === 'rent' && <span className="price-unit">/day</span>}
+                    {product.transactionType === 'borrow' && <span className="free-badge">FREE</span>}
+                  </div>
+                  
+                  <button 
+                    className="btn-view"
+                    onClick={() => {
+                      setSelectedProduct(product);
+                      setCurrentView('product-detail');
+                    }}
+                  >
+                    View Details
+                  </button>
+                </div>
+
+                <div className="seller-info">
+                  <span>👤 {product.sellerName}</span>
+                </div>
+              </div>
             </div>
           ))
-        ) : (
-          <p>No orders yet.</p>
         )}
       </div>
     </div>
   );
 
-  const SalesPage = () => (
-    <div className="page">
-      <h2>My Sales</h2>
-      <div className="orders-list">
-        {sales.length > 0 ? (
-          sales.map(order => (
-            <div key={order._id} className="order-card">
-              <h3>{order.product?.title}</h3>
-              <p>Buyer: {order.buyer?.name} ({order.buyer?.email})</p>
-              <p>Amount: ₹{order.totalAmount}</p>
-              <p>Status: <span className={`status status-${order.status}`}>{order.status}</span></p>
-              <p>Meetup: {order.meetupLocation} at {new Date(order.meetupTime).toLocaleString()}</p>
-              <p>Payment: {order.paymentMethod}</p>
-              <p>Contact: {order.buyer?.phoneNumber}</p>
-            </div>
-          ))
-        ) : (
-          <p>No sales yet.</p>
-        )}
-      </div>
-    </div>
-  );
-
-  const DashboardPage = () => (
-    <div className="page">
-      <h2>Dashboard</h2>
-      <div className="stats-grid">
-        <div className="stat-card">
-          <h3>Total Listings</h3>
-          <p className="stat-number">{stats.totalProducts || 0}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Active Listings</h3>
-          <p className="stat-number">{stats.activeProducts || 0}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Sold Items</h3>
-          <p className="stat-number">{stats.soldProducts || 0}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Total Orders</h3>
-          <p className="stat-number">{stats.totalOrders || 0}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Total Sales</h3>
-          <p className="stat-number">{stats.totalSales || 0}</p>
-        </div>
-      </div>
-    </div>
-  );
-
-  const ProductDetailModal = () => {
-    const [orderDetails, setOrderDetails] = useState({
-      meetupLocation: '',
-      meetupTime: '',
-      paymentMethod: 'cash'
-    });
-
+  // Product Detail View
+  const renderProductDetail = () => {
     if (!selectedProduct) return null;
 
     return (
-      <div className="modal-overlay" onClick={() => setSelectedProduct(null)}>
-        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-          <button className="close-btn" onClick={() => setSelectedProduct(null)}>×</button>
-          <h2>{selectedProduct.title}</h2>
-          <div className="product-detail">
-            <div className="detail-images">
-              {selectedProduct.images && selectedProduct.images.length > 0 ? (
-                selectedProduct.images.map((img, idx) => (
-                  <img key={idx} src={img} alt={selectedProduct.title} />
-                ))
-              ) : (
-                <div className="no-image-large">📦</div>
-              )}
-            </div>
-            <div className="detail-info">
-              <p className="detail-price">₹{selectedProduct.price}</p>
-              <p className="detail-description">{selectedProduct.description}</p>
-              <div className="detail-meta">
-                <p><strong>Category:</strong> {selectedProduct.category}</p>
-                <p><strong>Condition:</strong> {selectedProduct.condition}</p>
-                <p><strong>Available For:</strong> {selectedProduct.availableFor}</p>
-                <p><strong>Location:</strong> {selectedProduct.location || 'Campus'}</p>
-                <p><strong>Seller:</strong> {selectedProduct.seller?.name} ({selectedProduct.seller?.userType})</p>
-                <p><strong>Department:</strong> {selectedProduct.seller?.department}</p>
-                <p><strong>Contact:</strong> {selectedProduct.seller?.email}</p>
-                {selectedProduct.seller?.phoneNumber && (
-                  <p><strong>Phone:</strong> {selectedProduct.seller?.phoneNumber}</p>
-                )}
-                {selectedProduct.tags && selectedProduct.tags.length > 0 && (
-                  <p><strong>Tags:</strong> {selectedProduct.tags.join(', ')}</p>
-                )}
+      <div className="product-detail-page">
+        <button className="btn-back" onClick={() => setCurrentView('browse')}>
+          ← Back to Browse
+        </button>
+
+        <div className="product-detail-container">
+          <div className="product-detail-image">
+            {selectedProduct.imageUrl ? (
+              <img src={selectedProduct.imageUrl} alt={selectedProduct.title} />
+            ) : (
+              <div className="no-image-large">
+                {selectedProduct.category === 'electronics' && '💻'}
+                {selectedProduct.category === 'books' && '📚'}
+                {selectedProduct.category === 'furniture' && '🪑'}
+                {selectedProduct.category === 'sports' && '⚽'}
+                {selectedProduct.category === 'stationery' && '✏️'}
+                {selectedProduct.category === 'others' && '🎯'}
               </div>
-              {!user ? (
-                <div className="login-prompt">
-                  <p>Please login to place an order for this item.</p>
-                  <button onClick={() => setCurrentPage('login')}>Login</button>
+            )}
+          </div>
+
+          <div className="product-detail-info">
+            <h1>{selectedProduct.title}</h1>
+            
+            <div className="detail-badges">
+              <span className={`badge-type type-${selectedProduct.transactionType}`}>
+                {selectedProduct.transactionType === 'buy' && '💰 For Sale'}
+                {selectedProduct.transactionType === 'rent' && '🔄 For Rent'}
+                {selectedProduct.transactionType === 'borrow' && '🤝 To Borrow'}
+              </span>
+              <span className="badge-condition">{getConditionBadge(selectedProduct.condition)}</span>
+              <span className="badge-category">
+                {selectedProduct.category.charAt(0).toUpperCase() + selectedProduct.category.slice(1)}
+              </span>
+            </div>
+
+            <div className="price-large">
+              ₹{selectedProduct.price.toLocaleString('en-IN')}
+              {selectedProduct.transactionType === 'rent' && <span className="price-unit">/day</span>}
+              {selectedProduct.transactionType === 'borrow' && <span className="free-badge">FREE</span>}
+            </div>
+
+            <div className="description-section">
+              <h3>Description</h3>
+              <p>{selectedProduct.description}</p>
+            </div>
+
+            <div className="seller-section">
+              <h3>Seller Information</h3>
+              <p><strong>Name:</strong> {selectedProduct.sellerName}</p>
+              <p><strong>Email:</strong> {selectedProduct.sellerEmail}</p>
+              <p><strong>Listed:</strong> {formatDate(selectedProduct.createdAt)}</p>
+            </div>
+
+            <div className="action-buttons">
+              {user && user.id !== selectedProduct.sellerId && !selectedProduct.isSold && (
+                <button 
+                  className="btn-primary btn-large"
+                  onClick={() => handlePlaceOrder(selectedProduct)}
+                  disabled={loading}
+                >
+                  {loading ? 'Processing...' : 
+                    selectedProduct.transactionType === 'buy' ? '🛒 Buy Now' :
+                    selectedProduct.transactionType === 'rent' ? '🔄 Rent This' :
+                    '🤝 Request to Borrow'
+                  }
+                </button>
+              )}
+
+              {!user && (
+                <button 
+                  className="btn-primary btn-large"
+                  onClick={() => setCurrentView('login')}
+                >
+                  Login to Place Order
+                </button>
+              )}
+
+              {selectedProduct.isSold && (
+                <div className="sold-badge-large">
+                  ⚠️ This item is no longer available
                 </div>
-              ) : user.id !== selectedProduct.seller?._id ? (
-                <div className="order-form">
-                  <h3>Place Order</h3>
-                  <input
-                    type="text"
-                    placeholder="Meetup Location"
-                    value={orderDetails.meetupLocation}
-                    onChange={(e) => setOrderDetails({ ...orderDetails, meetupLocation: e.target.value })}
-                    required
-                  />
-                  <input
-                    type="datetime-local"
-                    value={orderDetails.meetupTime}
-                    onChange={(e) => setOrderDetails({ ...orderDetails, meetupTime: e.target.value })}
-                    required
-                  />
-                  <select value={orderDetails.paymentMethod} onChange={(e) => setOrderDetails({ ...orderDetails, paymentMethod: e.target.value })}>
-                    <option value="cash">Cash</option>
-                    <option value="upi">UPI</option>
-                    <option value="card">Card</option>
-                  </select>
-                  <button onClick={() => handlePlaceOrder(selectedProduct._id, orderDetails)}>
-                    Place Order
-                  </button>
+              )}
+
+              {user && user.id === selectedProduct.sellerId && (
+                <div className="own-product-notice">
+                  ℹ️ This is your listing
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
         </div>
@@ -737,20 +907,433 @@ function App() {
     );
   };
 
+  // Login Page
+  const renderLogin = () => (
+    <div className="auth-page">
+      <div className="auth-container">
+        <h2>Login to Your Account</h2>
+        <form onSubmit={handleLogin} className="auth-form">
+          <div className="form-group">
+            <label>Registration Number</label>
+            <input
+              type="text"
+              required
+              value={loginForm.registrationNumber}
+              onChange={(e) => setLoginForm({...loginForm, registrationNumber: e.target.value})}
+              placeholder="Enter your registration number"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Password</label>
+            <input
+              type="password"
+              required
+              value={loginForm.password}
+              onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+              placeholder="Enter your password"
+            />
+          </div>
+
+          <button type="submit" className="btn-primary btn-block" disabled={loading}>
+            {loading ? 'Logging in...' : 'Login'}
+          </button>
+        </form>
+
+        <p className="auth-switch">
+          Don't have an account? 
+          <button onClick={() => setCurrentView('register')}>Register here</button>
+        </p>
+      </div>
+    </div>
+  );
+
+  // Register Page
+  const renderRegister = () => (
+    <div className="auth-page">
+      <div className="auth-container">
+        <h2>Create an Account</h2>
+        <form onSubmit={handleRegister} className="auth-form">
+          <div className="form-group">
+            <label>Full Name</label>
+            <input
+              type="text"
+              required
+              value={registerForm.name}
+              onChange={(e) => setRegisterForm({...registerForm, name: e.target.value})}
+              placeholder="Your full name"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Registration Number</label>
+            <input
+              type="text"
+              required
+              value={registerForm.registrationNumber}
+              onChange={(e) => setRegisterForm({...registerForm, registrationNumber: e.target.value})}
+              placeholder="Enter your registration number"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Email</label>
+            <input
+              type="email"
+              required
+              value={registerForm.email}
+              onChange={(e) => setRegisterForm({...registerForm, email: e.target.value})}
+              placeholder="Enter your email"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Phone Number</label>
+            <input
+              type="tel"
+              required
+              value={registerForm.phone}
+              onChange={(e) => setRegisterForm({...registerForm, phone: e.target.value})}
+              placeholder="+91 9876543210"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Password</label>
+            <input
+              type="password"
+              required
+              minLength="6"
+              value={registerForm.password}
+              onChange={(e) => setRegisterForm({...registerForm, password: e.target.value})}
+              placeholder="Minimum 6 characters"
+            />
+          </div>
+
+          <button type="submit" className="btn-primary btn-block" disabled={loading}>
+            {loading ? 'Creating account...' : 'Register'}
+          </button>
+        </form>
+
+        <p className="auth-switch">
+          Already have an account? 
+          <button onClick={() => setCurrentView('login')}>Login here</button>
+        </p>
+      </div>
+    </div>
+  );
+
+  // Add Product Page
+  const renderAddProduct = () => (
+    <div className="add-product-page">
+      <div className="form-container">
+        <h2>List Your Item</h2>
+        <form onSubmit={handleAddProduct} className="product-form">
+          <div className="form-row">
+            <div className="form-group">
+              <label>Title *</label>
+              <input
+                type="text"
+                required
+                value={productForm.title}
+                onChange={(e) => setProductForm({...productForm, title: e.target.value})}
+                placeholder="e.g., iPhone 13 - Excellent Condition"
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Price (₹) *</label>
+              <input
+                type="number"
+                required
+                min="0"
+                value={productForm.price}
+                onChange={(e) => setProductForm({...productForm, price: e.target.value})}
+                placeholder="e.g., 45000"
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Description *</label>
+            <textarea
+              required
+              rows="4"
+              value={productForm.description}
+              onChange={(e) => setProductForm({...productForm, description: e.target.value})}
+              placeholder="Provide detailed information about your item..."
+            />
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label>Category *</label>
+              <select
+                value={productForm.category}
+                onChange={(e) => setProductForm({...productForm, category: e.target.value})}
+              >
+                <option value="electronics">Electronics</option>
+                <option value="books">Books</option>
+                <option value="furniture">Furniture</option>
+                <option value="sports">Sports</option>
+                <option value="stationery">Stationery</option>
+                <option value="others">Others</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Condition *</label>
+              <select
+                value={productForm.condition}
+                onChange={(e) => setProductForm({...productForm, condition: e.target.value})}
+              >
+                <option value="like-new">Like New</option>
+                <option value="good">Good</option>
+                <option value="fair">Fair</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label>Transaction Type *</label>
+              <select
+                value={productForm.transactionType}
+                onChange={(e) => setProductForm({...productForm, transactionType: e.target.value})}
+              >
+                <option value="buy">For Sale</option>
+                <option value="rent">For Rent</option>
+                <option value="borrow">To Borrow (Free)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Image URL (optional)</label>
+            <input
+              type="url"
+              value={productForm.imageUrl}
+              onChange={(e) => setProductForm({...productForm, imageUrl: e.target.value})}
+              placeholder="https://example.com/image.jpg"
+            />
+          </div>
+
+          <button type="submit" className="btn-primary btn-block" disabled={loading}>
+            {loading ? 'Listing...' : 'List Product'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+
+  // Dashboard
+  const renderDashboard = () => (
+    <div className="dashboard-page">
+      <h1>My Dashboard</h1>
+
+      <div className="dashboard-tabs">
+        <button className="tab-btn active">My Listings ({myListings.length})</button>
+        <button className="tab-btn">My Purchases ({myPurchases.length})</button>
+        <button className="tab-btn">My Sales ({mySales.length})</button>
+      </div>
+
+      <div className="dashboard-section">
+        <h2>My Listings</h2>
+        {myListings.length === 0 ? (
+          <div className="empty-state">
+            <p>You haven't listed any products yet</p>
+            <button className="btn-primary" onClick={() => setCurrentView('add-product')}>
+              List Your First Item
+            </button>
+          </div>
+        ) : (
+          <div className="listings-grid">
+            {myListings.map(product => (
+              <div key={product._id} className="listing-card">
+                <div className="listing-header">
+                  <h3>{product.title}</h3>
+                  <span className={product.isSold ? 'status-sold' : 'status-active'}>
+                    {product.isSold ? '🔴 Sold' : '🟢 Active'}
+                  </span>
+                </div>
+                <p className="listing-price">₹{product.price.toLocaleString('en-IN')}</p>
+                <p className="listing-meta">
+                  {product.category} • {product.condition} • {formatDate(product.createdAt)}
+                </p>
+                <div className="listing-actions">
+                  <button className="btn-danger" onClick={() => handleDeleteProduct(product._id)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="dashboard-section">
+        <h2>My Purchases</h2>
+        {myPurchases.length === 0 ? (
+          <div className="empty-state">
+            <p>You haven't made any purchases yet</p>
+            <button className="btn-primary" onClick={() => setCurrentView('browse')}>
+              Start Shopping
+            </button>
+          </div>
+        ) : (
+          <div className="orders-list">
+            {myPurchases.map(order => (
+              <div key={order._id} className="order-card">
+                <div className="order-header">
+                  <div>
+                    <h3>{order.productTitle}</h3>
+                    <p className="order-seller">Seller: {order.sellerName}</p>
+                  </div>
+                  <span 
+                    className="order-status"
+                    style={{backgroundColor: getStatusColor(order.status)}}
+                  >
+                    {order.status.toUpperCase()}
+                  </span>
+                </div>
+                <div className="order-details">
+                  <p><strong>Price:</strong> ₹{order.productPrice.toLocaleString('en-IN')}</p>
+                  <p><strong>Type:</strong> {order.transactionType}</p>
+                  <p><strong>Date:</strong> {formatDate(order.createdAt)}</p>
+                  {order.status === 'cancelled' && (
+                    <p className="cancel-info">
+                      <strong>Cancelled by:</strong> {order.cancelledBy}<br/>
+                      <strong>Reason:</strong> {order.cancellationReason}
+                    </p>
+                  )}
+                </div>
+                {order.status === 'pending' && (
+                  <button 
+                    className="btn-cancel"
+                    onClick={() => handleCancelOrder(order._id)}
+                    disabled={loading}
+                  >
+                    Cancel Order
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="dashboard-section">
+        <h2>My Sales</h2>
+        {mySales.length === 0 ? (
+          <div className="empty-state">
+            <p>No one has purchased your items yet</p>
+          </div>
+        ) : (
+          <div className="orders-list">
+            {mySales.map(order => (
+              <div key={order._id} className="order-card">
+                <div className="order-header">
+                  <div>
+                    <h3>{order.productTitle}</h3>
+                    <p className="order-buyer">Buyer: {order.buyerName}</p>
+                    <p className="order-buyer">Contact: {order.buyerEmail} • {order.buyerPhone}</p>
+                  </div>
+                  <span 
+                    className="order-status"
+                    style={{backgroundColor: getStatusColor(order.status)}}
+                  >
+                    {order.status.toUpperCase()}
+                  </span>
+                </div>
+                <div className="order-details">
+                  <p><strong>Price:</strong> ₹{order.productPrice.toLocaleString('en-IN')}</p>
+                  <p><strong>Type:</strong> {order.transactionType}</p>
+                  <p><strong>Date:</strong> {formatDate(order.createdAt)}</p>
+                  {order.status === 'cancelled' && (
+                    <p className="cancel-info">
+                      <strong>Cancelled by:</strong> {order.cancelledBy}<br/>
+                      <strong>Reason:</strong> {order.cancellationReason}
+                    </p>
+                  )}
+                </div>
+                {order.status === 'pending' && (
+                  <div className="order-actions">
+                    <button 
+                      className="btn-success"
+                      onClick={() => handleUpdateOrderStatus(order._id, 'confirmed')}
+                    >
+                      Confirm Order
+                    </button>
+                    <button 
+                      className="btn-cancel"
+                      onClick={() => handleCancelOrder(order._id)}
+                      disabled={loading}
+                    >
+                      Cancel Order
+                    </button>
+                  </div>
+                )}
+                {order.status === 'confirmed' && (
+                  <button 
+                    className="btn-primary"
+                    onClick={() => handleUpdateOrderStatus(order._id, 'completed')}
+                  >
+                    Mark as Completed
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // Messages Page
+  const renderMessages = () => (
+    <div className="messages-page">
+      <h1>Messages</h1>
+      {messages.length === 0 ? (
+        <div className="empty-state">
+          <p>No messages yet</p>
+        </div>
+      ) : (
+        <div className="messages-list">
+          {messages.map(msg => (
+            <div key={msg._id} className={`message-card ${msg.receiverId === user.id && !msg.isRead ? 'unread' : ''}`}>
+              <div className="message-header">
+                <strong>{msg.senderId === user.id ? '➡️ To: ' + msg.receiverName : '⬅️ From: ' + msg.senderName}</strong>
+                <span className="message-time">{formatDate(msg.createdAt)}</span>
+              </div>
+              {msg.productTitle && (
+                <p className="message-product">Re: {msg.productTitle}</p>
+              )}
+              <p className="message-text">{msg.message}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // Main Render
   return (
     <div className="App">
-      <Navigation />
-      <div className="container">
-        {currentPage === 'home' && <HomePage />}
-        {currentPage === 'login' && <LoginPage />}
-        {currentPage === 'register' && <RegisterPage />}
-        {currentPage === 'addProduct' && user && <AddProductPage />}
-        {currentPage === 'myProducts' && user && <MyProductsPage />}
-        {currentPage === 'orders' && user && <OrdersPage />}
-        {currentPage === 'sales' && user && <SalesPage />}
-        {currentPage === 'dashboard' && user && <DashboardPage />}
-      </div>
-      <ProductDetailModal />
+      {renderNavbar()}
+      {renderAlerts()}
+      
+      <main className="main-content">
+        {currentView === 'home' && renderHome()}
+        {currentView === 'browse' && renderBrowse()}
+        {currentView === 'product-detail' && renderProductDetail()}
+        {currentView === 'login' && renderLogin()}
+        {currentView === 'register' && renderRegister()}
+        {currentView === 'add-product' && renderAddProduct()}
+        {currentView === 'dashboard' && renderDashboard()}
+        {currentView === 'messages' && renderMessages()}
+      </main>
+
+      <footer className="footer">
+        <p>&copy; 2026 Smart Campus Marketplace. Built for VIT Students.</p>
+      </footer>
     </div>
   );
 }

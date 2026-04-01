@@ -1,36 +1,36 @@
+// Load environment variables
+require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const cors = require('cors');
 
 const app = express();
 
 // Middleware
-app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/campus-marketplace';
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('✅ MongoDB Connected Successfully'))
-.catch(err => console.error('❌ MongoDB Connection Error:', err));
+// CORS Configuration
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+app.use(cors(corsOptions));
+
+// ==================== MONGODB SCHEMAS ====================
 
 // User Schema
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
+  registrationNumber: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  userType: { type: String, enum: ['student', 'professor'], required: true },
-  department: String,
-  studentId: String,
-  employeeId: String,
-  phoneNumber: String,
+  phone: { type: String, required: true },
+  role: { type: String, default: 'student' },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -39,209 +39,260 @@ const productSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
   price: { type: Number, required: true },
-  category: { 
-    type: String, 
-    enum: ['textbooks', 'electronics', 'stationery', 'lab-equipment', 'furniture', 'clothing', 'services', 'other'],
-    required: true 
-  },
-  condition: { 
-    type: String, 
-    enum: ['new', 'like-new', 'good', 'fair'],
-    default: 'good'
-  },
-  images: [String],
-  seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  sellerType: String,
-  location: String,
-  availableFor: { 
-    type: String, 
-    enum: ['sale', 'rent', 'borrow'],
-    default: 'sale'
-  },
-  tags: [String],
-  views: { type: Number, default: 0 },
+  category: { type: String, required: true },
+  condition: { type: String, required: true },
+  transactionType: { type: String, required: true }, // buy, rent, borrow
+  imageUrl: { type: String, default: '' },
+  sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  sellerName: { type: String, required: true },
+  sellerEmail: { type: String, required: true },
   isSold: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
 // Order Schema
 const orderSchema = new mongoose.Schema({
-  buyer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  totalAmount: { type: Number, required: true },
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+  productTitle: { type: String, required: true },
+  productPrice: { type: Number, required: true },
+  sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  sellerName: { type: String, required: true },
+  buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  buyerName: { type: String, required: true },
+  buyerEmail: { type: String, required: true },
+  buyerPhone: { type: String, required: true },
   status: { 
     type: String, 
-    enum: ['pending', 'confirmed', 'completed', 'cancelled'],
-    default: 'pending'
+    enum: ['pending', 'confirmed', 'cancelled', 'completed'],
+    default: 'pending' 
   },
-  meetupLocation: String,
-  meetupTime: Date,
-  paymentMethod: { 
-    type: String, 
-    enum: ['cash', 'upi', 'card'],
-    default: 'cash'
-  },
-  createdAt: { type: Date, default: Date.now }
+  transactionType: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  cancelledAt: { type: Date },
+  cancelledBy: { type: String }, // 'buyer' or 'seller'
+  cancellationReason: { type: String }
 });
 
 // Message Schema
 const messageSchema = new mongoose.Schema({
-  sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  receiver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+  senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  senderName: { type: String, required: true },
+  receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  receiverName: { type: String, required: true },
+  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+  productTitle: { type: String },
   message: { type: String, required: true },
-  read: { type: Boolean, default: false },
+  isRead: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
+// Create Models
 const User = mongoose.model('User', userSchema);
 const Product = mongoose.model('Product', productSchema);
 const Order = mongoose.model('Order', orderSchema);
 const Message = mongoose.model('Message', messageSchema);
 
-// JWT Secret
-const JWT_SECRET = process.env.JWT_SECRET || 'campus-marketplace-secret-key-change-in-production';
+// ==================== MIDDLEWARE ====================
 
-// Auth Middleware
+// Authentication Middleware
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) return res.status(401).json({ error: 'Access denied' });
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
+  try {
+    const verified = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = verified;
     next();
-  });
+  } catch (err) {
+    res.status(403).json({ error: 'Invalid or expired token' });
+  }
 };
 
-// ==================== AUTH ROUTES ====================
+// ==================== ROUTES ====================
+
+// Health Check
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Smart Campus Marketplace API',
+    status: 'Running',
+    version: '1.0.0'
+  });
+});
+
+// ========== AUTHENTICATION ROUTES ==========
 
 // Register
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password, userType, department, studentId, employeeId, phoneNumber } = req.body;
+    const { name, registrationNumber, email, password, phone } = req.body;
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: 'User already exists' });
+    // Validation
+    if (!name || !registrationNumber || !email || !password || !phone) {
+      return res.status(400).json({ error: 'All fields are required' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Check if user exists by email or registration number
+    const existingUser = await User.findOne({
+      $or: [
+        { email },
+        { registrationNumber }
+      ]
+    });
 
+    if (existingUser) {
+      return res.status(400).json({ error: 'Email or registration number already registered' });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create user
     const user = new User({
       name,
+      registrationNumber,
       email,
       password: hashedPassword,
-      userType,
-      department,
-      studentId,
-      employeeId,
-      phoneNumber
+      phone
     });
 
     await user.save();
 
-    const token = jwt.sign({ userId: user._id, email: user.email, userType: user.userType }, JWT_SECRET);
+    // Generate token
+    const token = jwt.sign(
+      { id: user._id, registrationNumber: user.registrationNumber, email: user.email, name: user.name },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
-    res.status(201).json({ 
-      message: 'User registered successfully',
+    res.status(201).json({
+      message: 'Registration successful',
       token,
-      user: { id: user._id, name: user.name, email: user.email, userType: user.userType }
+      user: {
+        id: user._id,
+        name: user.name,
+        registrationNumber: user.registrationNumber,
+        email: user.email,
+        phone: user.phone
+      }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Server error during registration' });
   }
 });
 
 // Login
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { registrationNumber, password } = req.body;
 
-    const user = await User.findOne({ email });
+    // Validation
+    if (!registrationNumber || !password) {
+      return res.status(400).json({ error: 'Registration number and password are required' });
+    }
+
+    // Find user by registration number
+    const user = await User.findOne({ registrationNumber });
     if (!user) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+      return res.status(400).json({ error: 'Invalid registration number or password' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+    // Check password
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) {
+      return res.status(400).json({ error: 'Invalid registration number or password' });
     }
 
-    const token = jwt.sign({ userId: user._id, email: user.email, userType: user.userType }, JWT_SECRET);
+    // Generate token
+    const token = jwt.sign(
+      { id: user._id, registrationNumber: user.registrationNumber, email: user.email, name: user.name },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
 
-    res.json({ 
+    res.json({
+      message: 'Login successful',
       token,
-      user: { id: user._id, name: user.name, email: user.email, userType: user.userType }
+      user: {
+        id: user._id,
+        name: user.name,
+        registrationNumber: user.registrationNumber,
+        email: user.email,
+        phone: user.phone
+      }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Server error during login' });
   }
 });
 
-// ==================== PRODUCT ROUTES ====================
+// ========== PRODUCT ROUTES ==========
 
-// Get all products with filters
+// Get all products (with filters)
 app.get('/api/products', async (req, res) => {
   try {
-    const { category, condition, availableFor, search, minPrice, maxPrice } = req.query;
+    const { category, search, transactionType, minPrice, maxPrice } = req.query;
     
     let query = { isSold: false };
-    
-    if (category) query.category = category;
-    if (condition) query.condition = condition;
-    if (availableFor) query.availableFor = availableFor;
+
+    if (category && category !== 'all') {
+      query.category = category;
+    }
+
+    if (transactionType && transactionType !== 'all') {
+      query.transactionType = transactionType;
+    }
+
     if (search) {
       query.$or = [
         { title: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } }
+        { description: { $regex: search, $options: 'i' } }
       ];
     }
+
     if (minPrice || maxPrice) {
       query.price = {};
-      if (minPrice) query.price.$gte = parseFloat(minPrice);
-      if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+      if (minPrice) query.price.$gte = Number(minPrice);
+      if (maxPrice) query.price.$lte = Number(maxPrice);
     }
 
-    const products = await Product.find(query)
-      .populate('seller', 'name userType department')
-      .sort({ createdAt: -1 });
-
+    const products = await Product.find(query).sort({ createdAt: -1 });
     res.json(products);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching products:', error);
+    res.status(500).json({ error: 'Failed to fetch products' });
   }
 });
 
 // Get single product
 app.get('/api/products/:id', async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate('seller', 'name email userType department phoneNumber');
-    
+    const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
-
-    product.views += 1;
-    await product.save();
-
     res.json(product);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching product:', error);
+    res.status(500).json({ error: 'Failed to fetch product' });
   }
 });
 
-// Create product (Protected)
+// Add product (protected)
 app.post('/api/products', authenticateToken, async (req, res) => {
   try {
-    const { title, description, price, category, condition, images, location, availableFor, tags } = req.body;
+    const { title, description, price, category, condition, transactionType, imageUrl } = req.body;
 
-    const user = await User.findById(req.user.userId);
+    // Validation
+    if (!title || !description || !price || !category || !condition || !transactionType) {
+      return res.status(400).json({ error: 'All required fields must be provided' });
+    }
 
     const product = new Product({
       title,
@@ -249,22 +300,22 @@ app.post('/api/products', authenticateToken, async (req, res) => {
       price,
       category,
       condition,
-      images,
-      location,
-      availableFor,
-      tags,
-      seller: req.user.userId,
-      sellerType: user.userType
+      transactionType,
+      imageUrl: imageUrl || '',
+      sellerId: req.user.id,
+      sellerName: req.user.name,
+      sellerEmail: req.user.email
     });
 
     await product.save();
-    res.status(201).json({ message: 'Product created successfully', product });
+    res.status(201).json({ message: 'Product added successfully', product });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error adding product:', error);
+    res.status(500).json({ error: 'Failed to add product' });
   }
 });
 
-// Update product (Protected)
+// Update product (protected)
 app.put('/api/products/:id', authenticateToken, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -273,20 +324,25 @@ app.put('/api/products/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    if (product.seller.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+    // Check if user owns the product
+    if (product.sellerId.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'You can only update your own products' });
     }
 
-    Object.assign(product, req.body);
-    await product.save();
+    const updatedProduct = await Product.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true }
+    );
 
-    res.json({ message: 'Product updated successfully', product });
+    res.json({ message: 'Product updated successfully', product: updatedProduct });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error updating product:', error);
+    res.status(500).json({ error: 'Failed to update product' });
   }
 });
 
-// Delete product (Protected)
+// Delete product (protected)
 app.delete('/api/products/:id', authenticateToken, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -295,180 +351,297 @@ app.delete('/api/products/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    if (product.seller.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+    // Check if user owns the product
+    if (product.sellerId.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'You can only delete your own products' });
     }
 
-    await product.deleteOne();
+    await Product.findByIdAndDelete(req.params.id);
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error deleting product:', error);
+    res.status(500).json({ error: 'Failed to delete product' });
   }
 });
 
-// Get user's products (Protected)
-app.get('/api/my-products', authenticateToken, async (req, res) => {
+// Get user's products (protected)
+app.get('/api/products/user/my-listings', authenticateToken, async (req, res) => {
   try {
-    const products = await Product.find({ seller: req.user.userId })
-      .sort({ createdAt: -1 });
+    const products = await Product.find({ sellerId: req.user.id }).sort({ createdAt: -1 });
     res.json(products);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching user products:', error);
+    res.status(500).json({ error: 'Failed to fetch your products' });
   }
 });
 
-// ==================== ORDER ROUTES ====================
+// ========== ORDER ROUTES ==========
 
-// Create order (Protected)
+// Place order (protected)
 app.post('/api/orders', authenticateToken, async (req, res) => {
   try {
-    const { productId, meetupLocation, meetupTime, paymentMethod } = req.body;
+    const { productId } = req.body;
 
     const product = await Product.findById(productId);
-    if (!product || product.isSold) {
-      return res.status(400).json({ error: 'Product not available' });
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
     }
 
+    if (product.isSold) {
+      return res.status(400).json({ error: 'This product is no longer available' });
+    }
+
+    // Can't buy your own product
+    if (product.sellerId.toString() === req.user.id) {
+      return res.status(400).json({ error: 'You cannot buy your own product' });
+    }
+
+    // Get buyer details
+    const buyer = await User.findById(req.user.id);
+
     const order = new Order({
-      buyer: req.user.userId,
-      seller: product.seller,
-      product: productId,
-      totalAmount: product.price,
-      meetupLocation,
-      meetupTime,
-      paymentMethod
+      productId: product._id,
+      productTitle: product.title,
+      productPrice: product.price,
+      sellerId: product.sellerId,
+      sellerName: product.sellerName,
+      buyerId: req.user.id,
+      buyerName: req.user.name,
+      buyerEmail: req.user.email,
+      buyerPhone: buyer.phone,
+      transactionType: product.transactionType,
+      status: 'pending'
     });
 
     await order.save();
 
+    // Mark product as sold
     product.isSold = true;
     await product.save();
 
-    res.status(201).json({ message: 'Order placed successfully', order });
+    res.status(201).json({ 
+      message: 'Order placed successfully! The seller will contact you soon.', 
+      order 
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error placing order:', error);
+    res.status(500).json({ error: 'Failed to place order' });
   }
 });
 
-// Get user's orders (Protected)
-app.get('/api/my-orders', authenticateToken, async (req, res) => {
+// Get user's orders as buyer (protected)
+app.get('/api/orders/my-purchases', authenticateToken, async (req, res) => {
   try {
-    const orders = await Order.find({ buyer: req.user.userId })
-      .populate('product')
-      .populate('seller', 'name email phoneNumber')
-      .sort({ createdAt: -1 });
+    const orders = await Order.find({ buyerId: req.user.id }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching purchases:', error);
+    res.status(500).json({ error: 'Failed to fetch your purchases' });
   }
 });
 
-// Get user's sales (Protected)
-app.get('/api/my-sales', authenticateToken, async (req, res) => {
+// Get user's orders as seller (protected)
+app.get('/api/orders/my-sales', authenticateToken, async (req, res) => {
   try {
-    const orders = await Order.find({ seller: req.user.userId })
-      .populate('product')
-      .populate('buyer', 'name email phoneNumber')
-      .sort({ createdAt: -1 });
+    const orders = await Order.find({ sellerId: req.user.id }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching sales:', error);
+    res.status(500).json({ error: 'Failed to fetch your sales' });
   }
 });
 
-// Update order status (Protected)
-app.put('/api/orders/:id', authenticateToken, async (req, res) => {
+// Update order status (protected)
+app.put('/api/orders/:id/status', authenticateToken, async (req, res) => {
   try {
+    const { status } = req.body;
     const order = await Order.findById(req.params.id);
-    
+
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
-    if (order.seller.toString() !== req.user.userId && order.buyer.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'Not authorized' });
+    // Only seller can update order status
+    if (order.sellerId.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'Only the seller can update order status' });
     }
 
-    order.status = req.body.status;
+    order.status = status;
     await order.save();
 
-    res.json({ message: 'Order updated successfully', order });
+    res.json({ message: 'Order status updated', order });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error updating order:', error);
+    res.status(500).json({ error: 'Failed to update order status' });
   }
 });
 
-// ==================== MESSAGE ROUTES ====================
+// Cancel order (protected) - NEW FEATURE
+app.put('/api/orders/:id/cancel', authenticateToken, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const order = await Order.findById(req.params.id);
 
-// Send message (Protected)
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Check if order is already cancelled or completed
+    if (order.status === 'cancelled') {
+      return res.status(400).json({ error: 'Order is already cancelled' });
+    }
+
+    if (order.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot cancel a completed order' });
+    }
+
+    // Determine who is cancelling (buyer or seller)
+    let cancelledBy;
+    if (order.buyerId.toString() === req.user.id) {
+      cancelledBy = 'buyer';
+    } else if (order.sellerId.toString() === req.user.id) {
+      cancelledBy = 'seller';
+    } else {
+      return res.status(403).json({ error: 'You are not authorized to cancel this order' });
+    }
+
+    // Update order
+    order.status = 'cancelled';
+    order.cancelledAt = new Date();
+    order.cancelledBy = cancelledBy;
+    order.cancellationReason = reason || 'No reason provided';
+    await order.save();
+
+    // Make product available again
+    const product = await Product.findById(order.productId);
+    if (product) {
+      product.isSold = false;
+      await product.save();
+    }
+
+    res.json({ 
+      message: 'Order cancelled successfully. The product is now available again.', 
+      order 
+    });
+  } catch (error) {
+    console.error('Error cancelling order:', error);
+    res.status(500).json({ error: 'Failed to cancel order' });
+  }
+});
+
+// ========== MESSAGE ROUTES ==========
+
+// Send message (protected)
 app.post('/api/messages', authenticateToken, async (req, res) => {
   try {
     const { receiverId, productId, message } = req.body;
 
+    if (!receiverId || !message) {
+      return res.status(400).json({ error: 'Receiver and message are required' });
+    }
+
+    const receiver = await User.findById(receiverId);
+    if (!receiver) {
+      return res.status(404).json({ error: 'Receiver not found' });
+    }
+
+    let productTitle = null;
+    if (productId) {
+      const product = await Product.findById(productId);
+      productTitle = product ? product.title : null;
+    }
+
     const newMessage = new Message({
-      sender: req.user.userId,
-      receiver: receiverId,
-      product: productId,
+      senderId: req.user.id,
+      senderName: req.user.name,
+      receiverId,
+      receiverName: receiver.name,
+      productId: productId || null,
+      productTitle,
       message
     });
 
     await newMessage.save();
     res.status(201).json({ message: 'Message sent successfully', data: newMessage });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error sending message:', error);
+    res.status(500).json({ error: 'Failed to send message' });
   }
 });
 
-// Get conversations (Protected)
+// Get user's messages (protected)
 app.get('/api/messages', authenticateToken, async (req, res) => {
   try {
     const messages = await Message.find({
       $or: [
-        { sender: req.user.userId },
-        { receiver: req.user.userId }
+        { senderId: req.user.id },
+        { receiverId: req.user.id }
       ]
-    })
-    .populate('sender', 'name')
-    .populate('receiver', 'name')
-    .populate('product', 'title')
-    .sort({ createdAt: -1 });
+    }).sort({ createdAt: -1 });
 
     res.json(messages);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
 
-// ==================== STATS ROUTES ====================
-
-// Get dashboard stats (Protected)
-app.get('/api/stats', authenticateToken, async (req, res) => {
+// Mark message as read (protected)
+app.put('/api/messages/:id/read', authenticateToken, async (req, res) => {
   try {
-    const totalProducts = await Product.countDocuments({ seller: req.user.userId });
-    const activeProducts = await Product.countDocuments({ seller: req.user.userId, isSold: false });
-    const soldProducts = await Product.countDocuments({ seller: req.user.userId, isSold: true });
-    const totalOrders = await Order.countDocuments({ buyer: req.user.userId });
-    const totalSales = await Order.countDocuments({ seller: req.user.userId });
+    const message = await Message.findById(req.params.id);
+    
+    if (!message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
 
-    res.json({
-      totalProducts,
-      activeProducts,
-      soldProducts,
-      totalOrders,
-      totalSales
-    });
+    if (message.receiverId.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'You can only mark your own messages as read' });
+    }
+
+    message.isRead = true;
+    await message.save();
+
+    res.json({ message: 'Message marked as read' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error marking message as read:', error);
+    res.status(500).json({ error: 'Failed to mark message as read' });
   }
 });
 
-// Home route
-app.get('/', (req, res) => {
-  res.json({ message: 'Smart Campus Marketplace API - MERN Stack' });
+// ==================== DATABASE CONNECTION ====================
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log('✅ MongoDB Connected Successfully');
+    console.log('📦 Database:', mongoose.connection.name);
+  } catch (error) {
+    console.error('❌ MongoDB Connection Error:', error.message);
+    process.exit(1);
+  }
+};
+
+// ==================== START SERVER ====================
+
+const PORT = process.env.PORT || 5000;
+
+connectDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+    console.log(`📡 API ready at http://localhost:${PORT}`);
+  });
 });
 
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('👋 SIGTERM received, shutting down gracefully');
+  mongoose.connection.close(() => {
+    console.log('💤 MongoDB connection closed');
+    process.exit(0);
+  });
 });
