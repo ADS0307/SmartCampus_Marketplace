@@ -67,24 +67,10 @@ const orderSchema = new mongoose.Schema({
   cancellationReason: { type: String }
 });
 
-// Message Schema
-const messageSchema = new mongoose.Schema({
-  senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  senderName: { type: String, required: true },
-  receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  receiverName: { type: String, required: true },
-  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
-  productTitle: { type: String },
-  message: { type: String, required: true },
-  isRead: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-});
-
 // Create Models
 const User = mongoose.model('User', userSchema);
 const Product = mongoose.model('Product', productSchema);
 const Order = mongoose.model('Order', orderSchema);
-const Message = mongoose.model('Message', messageSchema);
 
 // ==================== MIDDLEWARE ====================
 
