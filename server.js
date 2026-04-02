@@ -35,8 +35,10 @@ const productSchema = new mongoose.Schema({
   price: { type: Number, required: true },
   category: { type: String, required: true },
   condition: { type: String, required: true },
-  transactionType: { type: String, required: true }, // buy, rent, borrow
+  transactionType: { type: String, required: true, enum: ['buy', 'rent', 'borrow', 'service'] }, // buy, rent, borrow, service
   imageUrl: { type: String, default: '' },
+  schedule: { type: String, default: '' },
+  isTutoring: { type: Boolean, default: false },
   sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   sellerName: { type: String, required: true },
   sellerEmail: { type: String, required: true },
@@ -108,7 +110,8 @@ app.get('/', (req, res) => {
 // Register
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, registrationNumber, email, password, phone } = req.body;
+    const { name, registrationNumber, email, password, phone, role } = req.body;
+    const normalizedRole = role === 'teacher' ? 'teacher' : 'student';
 
     // Validation
     if (!name || !registrationNumber || !email || !password || !phone) {
@@ -137,14 +140,15 @@ app.post('/api/auth/register', async (req, res) => {
       registrationNumber,
       email,
       password: hashedPassword,
-      phone
+      phone,
+      role: normalizedRole
     });
 
     await user.save();
 
     // Generate token
     const token = jwt.sign(
-      { id: user._id, registrationNumber: user.registrationNumber, email: user.email, name: user.name },
+      { id: user._id, registrationNumber: user.registrationNumber, email: user.email, name: user.name, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -157,7 +161,8 @@ app.post('/api/auth/register', async (req, res) => {
         name: user.name,
         registrationNumber: user.registrationNumber,
         email: user.email,
-        phone: user.phone
+        phone: user.phone,
+        role: user.role
       }
     });
   } catch (error) {
@@ -190,7 +195,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     // Generate token
     const token = jwt.sign(
-      { id: user._id, registrationNumber: user.registrationNumber, email: user.email, name: user.name },
+      { id: user._id, registrationNumber: user.registrationNumber, email: user.email, name: user.name, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -203,7 +208,8 @@ app.post('/api/auth/login', async (req, res) => {
         name: user.name,
         registrationNumber: user.registrationNumber,
         email: user.email,
-        phone: user.phone
+        phone: user.phone,
+        role: user.role
       }
     });
   } catch (error) {

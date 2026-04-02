@@ -12,7 +12,7 @@ function App() {
   
   // Form States
   const [loginForm, setLoginForm] = useState({ registrationNumber: '', password: '' });
-  const [registerForm, setRegisterForm] = useState({ name: '', registrationNumber: '', email: '', password: '', phone: '' });
+  const [registerForm, setRegisterForm] = useState({ name: '', registrationNumber: '', email: '', password: '', phone: '', role: 'student' });
   const [productForm, setProductForm] = useState({
     title: '',
     description: '',
@@ -20,7 +20,9 @@ function App() {
     category: 'electronics',
     condition: 'good',
     transactionType: 'buy',
-    imageUrl: ''
+    imageUrl: '',
+    schedule: '',
+    isTutoring: false
   });
 
   // Data States
@@ -153,7 +155,7 @@ function App() {
         localStorage.setItem('token', data.token);
         setToken(data.token);
         setUser(data.user);
-        setRegisterForm({ name: '', registrationNumber: '', email: '', password: '', phone: '' });
+        setRegisterForm({ name: '', registrationNumber: '', email: '', password: '', phone: '', role: 'student' });
         setTimeout(() => setCurrentView('home'), 1000);
       } else {
         setError(data.error || 'Registration failed');
@@ -239,7 +241,9 @@ function App() {
           category: 'electronics',
           condition: 'good',
           transactionType: 'buy',
-          imageUrl: ''
+          imageUrl: '',
+          schedule: '',
+          isTutoring: false
         });
         fetchProducts();
         fetchMyListings();
@@ -649,6 +653,7 @@ function App() {
             <option value="buy">For Sale</option>
             <option value="rent">For Rent</option>
             <option value="borrow">To Borrow</option>
+            <option value="service">Tutoring Service</option>
           </select>
 
           <input
@@ -703,6 +708,7 @@ function App() {
                   {product.transactionType === 'buy' && '💰 For Sale'}
                   {product.transactionType === 'rent' && '🔄 For Rent'}
                   {product.transactionType === 'borrow' && '🤝 To Borrow'}
+                  {product.transactionType === 'service' && '📚 Tutoring'}
                 </span>
               </div>
               
@@ -721,6 +727,7 @@ function App() {
                   <div className="price-section">
                     <span className="price">₹{product.price.toLocaleString('en-IN')}</span>
                     {product.transactionType === 'rent' && <span className="price-unit">/day</span>}
+                    {product.transactionType === 'service' && <span className="price-unit">/session</span>}
                     {product.transactionType === 'borrow' && <span className="free-badge">FREE</span>}
                   </div>
                   
@@ -780,16 +787,14 @@ function App() {
                 {selectedProduct.transactionType === 'buy' && '💰 For Sale'}
                 {selectedProduct.transactionType === 'rent' && '🔄 For Rent'}
                 {selectedProduct.transactionType === 'borrow' && '🤝 To Borrow'}
-              </span>
-              <span className="badge-condition">{getConditionBadge(selectedProduct.condition)}</span>
-              <span className="badge-category">
-                {selectedProduct.category.charAt(0).toUpperCase() + selectedProduct.category.slice(1)}
+                {selectedProduct.transactionType === 'service' && '📚 Tutoring'}
               </span>
             </div>
 
             <div className="price-large">
               ₹{selectedProduct.price.toLocaleString('en-IN')}
               {selectedProduct.transactionType === 'rent' && <span className="price-unit">/day</span>}
+              {selectedProduct.transactionType === 'service' && <span className="price-unit">/session</span>}
               {selectedProduct.transactionType === 'borrow' && <span className="free-badge">FREE</span>}
             </div>
 
@@ -797,6 +802,13 @@ function App() {
               <h3>Description</h3>
               <p>{selectedProduct.description}</p>
             </div>
+
+            {selectedProduct.schedule && (
+              <div className="description-section">
+                <h3>Schedule</h3>
+                <p>{selectedProduct.schedule}</p>
+              </div>
+            )}
 
             <div className="seller-section">
               <h3>Seller Information</h3>
@@ -906,13 +918,24 @@ function App() {
           </div>
 
           <div className="form-group">
-            <label>Registration Number</label>
+            <label>Account Type</label>
+            <select
+              value={registerForm.role}
+              onChange={(e) => setRegisterForm({...registerForm, role: e.target.value})}
+            >
+              <option value="student">Student</option>
+              <option value="teacher">Teacher</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label>{registerForm.role === 'teacher' ? 'Employee ID' : 'Registration Number'}</label>
             <input
               type="text"
               required
               value={registerForm.registrationNumber}
               onChange={(e) => setRegisterForm({...registerForm, registrationNumber: e.target.value})}
-              placeholder="Enter your registration number"
+              placeholder={registerForm.role === 'teacher' ? 'Enter your employee ID' : 'Enter your registration number'}
             />
           </div>
 
@@ -1017,6 +1040,7 @@ function App() {
                 <option value="furniture">Furniture</option>
                 <option value="sports">Sports</option>
                 <option value="stationery">Stationery</option>
+                <option value="services">Services</option>
                 <option value="others">Others</option>
               </select>
             </div>
@@ -1033,6 +1057,26 @@ function App() {
               </select>
             </div>
 
+            {user?.role === 'teacher' && (
+              <div className="form-group">
+                <label>Offer Tutoring Service?</label>
+                <input
+                  type="checkbox"
+                  checked={productForm.isTutoring}
+                  onChange={(e) => {
+                    const isTutoring = e.target.checked;
+                    setProductForm({
+                      ...productForm,
+                      isTutoring,
+                      transactionType: isTutoring ? 'service' : 'buy',
+                      category: isTutoring ? 'services' : productForm.category,
+                      schedule: isTutoring ? productForm.schedule : ''
+                    });
+                  }}
+                />
+              </div>
+            )}
+
             <div className="form-group">
               <label>Transaction Type *</label>
               <select
@@ -1042,9 +1086,23 @@ function App() {
                 <option value="buy">For Sale</option>
                 <option value="rent">For Rent</option>
                 <option value="borrow">To Borrow (Free)</option>
+                <option value="service">Tutoring Service</option>
               </select>
             </div>
           </div>
+
+          {productForm.isTutoring && (
+            <div className="form-group">
+              <label>Schedule / Timings *</label>
+              <input
+                type="text"
+                required
+                value={productForm.schedule}
+                onChange={(e) => setProductForm({...productForm, schedule: e.target.value})}
+                placeholder="e.g. Mon/Wed 5-7pm, Sat 10-12pm"
+              />
+            </div>
+          )}
 
           <div className="form-group">
             <label>Image URL (optional)</label>
