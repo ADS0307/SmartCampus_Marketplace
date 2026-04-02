@@ -43,22 +43,9 @@ const orderSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const messageSchema = new mongoose.Schema({
-  senderId: mongoose.Schema.Types.ObjectId,
-  senderName: String,
-  receiverId: mongoose.Schema.Types.ObjectId,
-  receiverName: String,
-  productId: mongoose.Schema.Types.ObjectId,
-  productTitle: String,
-  message: String,
-  isRead: { type: Boolean, default: false },
-  createdAt: { type: Date, default: Date.now }
-});
-
 const User = mongoose.model('User', userSchema);
 const Product = mongoose.model('Product', productSchema);
 const Order = mongoose.model('Order', orderSchema);
-const Message = mongoose.model('Message', messageSchema);
 
 // Sample data
 const seedData = async () => {
@@ -67,7 +54,6 @@ const seedData = async () => {
     await User.deleteMany({});
     await Product.deleteMany({});
     await Order.deleteMany({});
-    await Message.deleteMany({});
 
     console.log('🧹 Cleared existing data');
 
@@ -429,48 +415,11 @@ const seedData = async () => {
 
     console.log(`✅ Created ${orders.length} sample orders`);
 
-    // Create some sample messages
-    const messages = await Message.insertMany([
-      {
-        senderId: users[2]._id,
-        senderName: users[2].name,
-        receiverId: users[0]._id,
-        receiverName: users[0].name,
-        productId: products[0]._id,
-        productTitle: products[0].title,
-        message: 'Hi! Is the iPhone still available? Can we meet tomorrow?',
-        isRead: false
-      },
-      {
-        senderId: users[0]._id,
-        senderName: users[0].name,
-        receiverId: users[2]._id,
-        receiverName: users[2].name,
-        productId: products[0]._id,
-        productTitle: products[0].title,
-        message: 'Yes, it\'s available! Let\'s meet at the library tomorrow at 3 PM.',
-        isRead: true
-      },
-      {
-        senderId: users[3]._id,
-        senderName: users[3].name,
-        receiverId: users[1]._id,
-        receiverName: users[1].name,
-        productId: products[1]._id,
-        productTitle: products[1].title,
-        message: 'I need the MacBook for 3 days. Is that possible?',
-        isRead: false
-      }
-    ]);
-
-    console.log(`✅ Created ${messages.length} sample messages`);
-
     console.log('\n🎉 Database seeded successfully!');
     console.log('\n📊 Summary:');
     console.log(`   👥 Users: ${users.length}`);
     console.log(`   📦 Products: ${products.length}`);
     console.log(`   🛒 Orders: ${orders.length}`);
-    console.log(`   💬 Messages: ${messages.length}`);
     console.log('\n🔑 Login credentials for all users:');
     console.log('   Email: rajesh@vit.edu (or any user email)');
     console.log('   Password: password123');

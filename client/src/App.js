@@ -29,9 +29,7 @@ function App() {
   const [myListings, setMyListings] = useState([]);
   const [myPurchases, setMyPurchases] = useState([]);
   const [mySales, setMySales] = useState([]);
-  const [messages, setMessages] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [messageText, setMessageText] = useState('');
 
   // Filter States
   const [searchQuery, setSearchQuery] = useState('');
@@ -59,8 +57,6 @@ function App() {
       fetchMyListings();
       fetchMyPurchases();
       fetchMySales();
-    } else if (currentView === 'messages' && user) {
-      fetchMessages();
     }
   }, [currentView, user]);
 
@@ -132,20 +128,6 @@ function App() {
       setMySales(data);
     } catch (error) {
       console.error('Error fetching sales:', error);
-    }
-  };
-
-  const fetchMessages = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/messages`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      const data = await response.json();
-      setMessages(data);
-    } catch (error) {
-      console.error('Error fetching messages:', error);
     }
   };
 
@@ -392,40 +374,6 @@ function App() {
     }
   };
 
-  // ==================== MESSAGE HANDLERS ====================
-
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!messageText.trim()) return;
-
-    try {
-      const response = await fetch(`${API_URL}/api/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          receiverId: selectedProduct.sellerId,
-          productId: selectedProduct._id,
-          message: messageText
-        })
-      });
-
-      if (response.ok) {
-        setSuccess('Message sent successfully!');
-        setMessageText('');
-        fetchMessages();
-      } else {
-        const data = await response.json();
-        setError(data.error || 'Failed to send message');
-      }
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setError('Network error. Please try again.');
-    }
-  };
-
   // ==================== FILTER HANDLERS ====================
 
   const applyFilters = () => {
@@ -554,14 +502,6 @@ function App() {
               onClick={() => setCurrentView('dashboard')}
             >
               Dashboard
-            </button>
-            <button 
-              className={currentView === 'messages' ? 'nav-link active' : 'nav-link'}
-              onClick={() => setCurrentView('messages')}
-            >
-              Messages {messages.filter(m => !m.isRead && m.receiverId === user.id).length > 0 && 
-                <span className="badge">{messages.filter(m => !m.isRead && m.receiverId === user.id).length}</span>
-              }
             </button>
             <div className="nav-user">
               <span className="user-name">👤 {user.name}</span>
@@ -1287,33 +1227,6 @@ function App() {
     </div>
   );
 
-  // Messages Page
-  const renderMessages = () => (
-    <div className="messages-page">
-      <h1>Messages</h1>
-      {messages.length === 0 ? (
-        <div className="empty-state">
-          <p>No messages yet</p>
-        </div>
-      ) : (
-        <div className="messages-list">
-          {messages.map(msg => (
-            <div key={msg._id} className={`message-card ${msg.receiverId === user.id && !msg.isRead ? 'unread' : ''}`}>
-              <div className="message-header">
-                <strong>{msg.senderId === user.id ? '➡️ To: ' + msg.receiverName : '⬅️ From: ' + msg.senderName}</strong>
-                <span className="message-time">{formatDate(msg.createdAt)}</span>
-              </div>
-              {msg.productTitle && (
-                <p className="message-product">Re: {msg.productTitle}</p>
-              )}
-              <p className="message-text">{msg.message}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
   // Main Render
   return (
     <div className="App">
@@ -1328,7 +1241,6 @@ function App() {
         {currentView === 'register' && renderRegister()}
         {currentView === 'add-product' && renderAddProduct()}
         {currentView === 'dashboard' && renderDashboard()}
-        {currentView === 'messages' && renderMessages()}
       </main>
 
       <footer className="footer">
